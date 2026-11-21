@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# PyInstaller (construir.bat)
+build/
+dist/
+*.spec
+KindleEnvia.exe
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini
