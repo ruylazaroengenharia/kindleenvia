@@ -254,6 +254,12 @@ def janela(arquivos_iniciais):
     def atualizar_pendentes():
         n = len(kindle.pendentes())
         pend_lbl.configure(text=("📮 %d na fila para o Kindle" % n) if n else "")
+        try:  # o Kindle pode ter sido achado em outro IP (casa, escritório...)
+            if ip_k.get().strip() != cfg["kindle"]["ip"]:
+                ip_k.delete(0, "end")
+                ip_k.insert(0, cfg["kindle"]["ip"])
+        except NameError:
+            pass
 
     def lista_com_botoes(pai, altura=7):
         caixa = ttk.Frame(pai)

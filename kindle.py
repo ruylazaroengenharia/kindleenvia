@@ -3,9 +3,12 @@ Conversa com o servidor.py que roda no Kindle (pelo Wi-Fi).
 Se o Kindle não responder, o arquivo vai para a fila de pendentes e é
 reenviado depois (ao abrir o programa ou no modo automático).
 """
+import concurrent.futures
 import json
 import os
+import re
 import shutil
+import socket
 import time
 import uuid
 import urllib.error
@@ -13,6 +16,10 @@ import urllib.parse
 import urllib.request
 
 import config
+
+
+# O Kindle está na rede local: ignora proxies do sistema (comuns em redes de escritório)
+_SEM_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 class KindleErro(Exception):
@@ -30,7 +37,75 @@ def _base(cfg):
     return "http://%s:%s" % (k["ip"].strip(), k.get("porta", 8000)), k["senha"]
 
 
-def _pedir(cfg, metodo, rota, params=None, corpo=None, tipo=None, timeout=20):
+def _meus_ips():
+    """IPs deste PC nas redes locais (casa, escritório...)."""
+    ips = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ips.add(info[4][0])
+    except OSError:
+        pass
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("10.255.255.255", 1))
+        ips.add(s.getsockname()[0])
+        s.close()
+    except OSError:
+        pass
+    privado = re.compile(r"^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)")
+    return sorted(ip for ip in ips if privado.match(ip))
+
+
+def _porta_aberta(ip, porta):
+    try:
+        with socket.create_connection((ip, porta), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def descobrir(cfg):
+    """Procura o Kindle na rede local: porta do servidor aberta + resposta ao /ping com a senha.
+    Devolve o IP encontrado ou None."""
+    k = cfg["kindle"]
+    porta, senha = int(k.get("porta", 8000)), k.get("senha", "")
+    if not senha:
+        return None
+    candidatos = []
+    for meu in _meus_ips():
+        base = meu.rsplit(".", 1)[0]
+        candidatos += ["%s.%d" % (base, i) for i in range(1, 255) if "%s.%d" % (base, i) != meu]
+    if not candidatos:
+        return None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as ex:
+        abertos = [ip for ip, ok in zip(candidatos, ex.map(lambda ip: _porta_aberta(ip, porta), candidatos)) if ok]
+    for ip in abertos:
+        url = "http://%s:%d/ping?%s" % (ip, porta, urllib.parse.urlencode({"k": senha, "formato": "json"}))
+        try:
+            with _SEM_PROXY.open(url, timeout=4) as r:
+                if json.loads(r.read().decode("utf-8")).get("ok"):
+                    return ip
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _pedir(cfg, metodo, rota, params=None, corpo=None, tipo=None, timeout=20, procurar=True):
+    """Faz o pedido ao Kindle. Se ele não responder no IP salvo, procura na rede e tenta de novo."""
+    try:
+        return _pedir_uma_vez(cfg, metodo, rota, params, corpo, tipo, timeout)
+    except KindleOffline:
+        if not procurar or not cfg["kindle"].get("procurar", True):
+            raise
+        novo = descobrir(cfg)
+        if not novo or novo == cfg["kindle"]["ip"].strip():
+            raise
+        cfg["kindle"]["ip"] = novo           # achou em outro IP: guarda para as próximas vezes
+        config.salvar(cfg)
+        return _pedir_uma_vez(cfg, metodo, rota, params, corpo, tipo, timeout)
+
+
+def _pedir_uma_vez(cfg, metodo, rota, params=None, corpo=None, tipo=None, timeout=20):
     base, senha = _base(cfg)
     q = {"k": senha, "formato": "json"}
     q.update(params or {})
@@ -39,7 +114,7 @@ def _pedir(cfg, metodo, rota, params=None, corpo=None, tipo=None, timeout=20):
     if tipo:
         req.add_header("Content-Type", tipo)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with _SEM_PROXY.open(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         if e.code == 403:
@@ -48,15 +123,17 @@ def _pedir(cfg, metodo, rota, params=None, corpo=None, tipo=None, timeout=20):
             raise KindleErro("O servidor do Kindle é antigo. Copie o servidor.py novo para D:\\scripts.")
         raise KindleErro("O Kindle respondeu com erro %d." % e.code)
     except (urllib.error.URLError, OSError) as e:
-        raise KindleOffline("O Kindle não respondeu em %s (%s). Ele está acordado, no Wi-Fi "
-                            "e com o servidor.py ligado?" % (base, getattr(e, "reason", e)))
+        raise KindleOffline("O Kindle não respondeu em %s e não foi achado na rede (%s). Ele está "
+                            "acordado, no Wi-Fi e com o servidor.py ligado?" % (base, getattr(e, "reason", e)))
     except ValueError:
         raise KindleErro("Resposta estranha do Kindle. O servidor.py está atualizado?")
 
 
 def testar(cfg):
+    ip_antes = cfg["kindle"]["ip"].strip()
     r = _pedir(cfg, "GET", "/ping", timeout=8)
-    return "Conectado! Espaço livre no Kindle: %.0f MB" % (r.get("livre", 0) / 1048576.0)
+    achado = "" if cfg["kindle"]["ip"] == ip_antes else " (achado na rede em %s)" % cfg["kindle"]["ip"]
+    return "Conectado%s! Espaço livre no Kindle: %.0f MB" % (achado, r.get("livre", 0) / 1048576.0)
 
 
 def listar(cfg):

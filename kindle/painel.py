@@ -17,6 +17,7 @@ Uso (pelo SSH):
 
 import datetime
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -36,6 +37,9 @@ MAX_TAREFAS = 3 if MODO == "faixa" else 12
 # Segundos depois de o Kindle começar a dormir em que a faixa é (re)desenhada.
 # Redesenha algumas vezes porque a imagem do screensaver às vezes demora e cobre a faixa.
 REDESENHOS = (2, 5, 9)
+# Quando o Kindle acorda, pede para conectar no Wi-Fi (ele não conecta sozinho)
+RECONECTAR_AO_ACORDAR = True
+MOSTRAR_IP = True
 EIPS = os.environ.get("EIPS", "eips")
 COLUNAS, LINHAS = 50, 40  # grade de texto do eips no Kindle 4 (600x800)
 # ----------------------------------------------------------------------------
@@ -82,6 +86,58 @@ def bateria():
     return None
 
 
+def ip_wifi():
+    """IP atual do Wi-Fi (ex.: 192.168.15.177), ou None."""
+    try:
+        saida = subprocess.check_output(["ifconfig", "wlan0"], stderr=subprocess.DEVNULL).decode("latin-1")
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    m = re.search(r"inet (?:addr:)?(\d+\.\d+\.\d+\.\d+)", saida)
+    return m.group(1) if m else None
+
+
+def _lipc(*args):
+    try:
+        r = subprocess.run(["lipc-" + args[0]] + list(args[1:]), stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, timeout=15)
+        return r.returncode, r.stdout.decode("utf-8", "replace").strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        return -1, str(e)
+
+
+def garantir_wifi():
+    """Pede ao Kindle para conectar no Wi-Fi (as redes conhecidas), se ainda não estiver."""
+    time.sleep(3)
+    if ip_wifi():
+        return
+    for args in (("set-prop", "com.lab126.cmd", "ensureConnection", "wifi"),
+                 ("set-prop", "com.lab126.wifid", "enable", "1")):
+        codigo, saida = _lipc(*args)
+        print("%s wifi: lipc-%s -> %s %s" % (time.strftime("%Y-%m-%d %H:%M:%S"), " ".join(args), codigo, saida))
+        if codigo == 0:
+            break
+    for _ in range(20):                  # espera até 40 s para conectar
+        time.sleep(2)
+        if ip_wifi():
+            print("%s wifi conectado: %s" % (time.strftime("%Y-%m-%d %H:%M:%S"), ip_wifi()))
+            return
+
+
+def vigiar_acordar():
+    """Roda numa thread: a cada vez que o Kindle acorda, garante o Wi-Fi."""
+    while True:
+        inicio = time.time()
+        subprocess.call(["lipc-wait-event", "com.lab126.powerd", "outOfScreenSaver"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if time.time() - inicio < 0.5:
+            time.sleep(30)
+            continue
+        try:
+            garantir_wifi()
+        except Exception as e:  # noqa: BLE001 - o painel não pode morrer por causa disso
+            print("erro ao garantir o wifi: %s" % e)
+
+
 def montar():
     hoje = datetime.date.today()
     linhas = []
@@ -94,7 +150,11 @@ def montar():
         bat = "bat [%s]" % ("#" * round(nivel / 10.0)).ljust(10, "-")
     data = "%s, %d %s" % (DIAS[hoje.weekday()], hoje.day, MESES[hoje.month - 1])
     linhas.append(data + bat.rjust(COLUNAS - 3 - len(data)))
-    linhas.append("-" * (COLUNAS - 2))
+    endereco = ip_wifi() if MOSTRAR_IP else None
+    if endereco:
+        linhas.append(("-- %s:8000 " % endereco).ljust(COLUNAS - 2, "-"))
+    else:
+        linhas.append("-" * (COLUNAS - 2))
 
     frases = ler_linhas(FRASES)
     if frases:
@@ -199,6 +259,8 @@ def principal():
     if "--fundo" in sys.argv:
         ir_para_fundo(os.path.join(PASTA, "painel.log"))
     print("%s painel iniciado (modo %s)" % (time.strftime("%Y-%m-%d %H:%M:%S"), MODO))
+    if RECONECTAR_AO_ACORDAR:
+        threading.Thread(target=vigiar_acordar, daemon=True).start()
     while True:
         inicio = time.time()
         esperar_dormir()

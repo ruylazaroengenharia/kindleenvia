@@ -8,6 +8,7 @@ Dá vida nova a um **Kindle 4 (sem touch)**: o PC converte arquivos, **fotos do 
 | **📓 Caderno (IA)**: foto da página → texto, resumo, diagrama ou desenho | **Telas de descanso**: ver, enviar (já ajustadas) e apagar |
 | **📰 Notícias**: canais RSS → *Jornal do dia* com resumo da IA, enviado ao ligar o PC | **Painel**: data, bateria e frase do dia no rodapé do screensaver |
 | **📮 Fila**: se o Kindle estiver dormindo, envia depois | **Início automático**: tudo volta sozinho quando o Kindle reinicia |
+| **🔎 Acha o Kindle sozinho** em qualquer rede (casa, escritório) | **Wi-Fi ao acordar**: reconecta sozinho e mostra o IP na faixa |
 
 ---
 
@@ -138,7 +139,10 @@ Em **`http://IP-DO-KINDLE:8000`**:
 - **📚 Livros**: lista, baixa e envia livros (AZW3, MOBI, PDF, TXT).
 - **🖼️ Telas de descanso**: mostra as imagens do ScreenSavers Hack, envia novas (o navegador ajusta para 600×800 em cinza, com opção de deixar o rodapé livre para o painel), apaga, edita as frases do painel e reinicia o Kindle.
 
-O **painel** escreve a data, a bateria e a frase do dia no rodapé sempre que o Kindle dorme. A troca de frase é diária, em sequência.
+O **painel** escreve a data, a bateria, o **endereço do servidor** (ex.: `192.168.15.177:8000`) e a frase do dia no rodapé sempre que o Kindle dorme. A troca de frase é diária, em sequência. Quando o Kindle acorda, o painel também pede para ele **conectar no Wi-Fi** (o Kindle 4 não reconecta sozinho), e o registro disso fica em `painel.log`.
+
+### 🔎 Casa, escritório e IP que muda
+O Kindle Envia guarda o último IP do Kindle. Se o Kindle não responder nesse IP, o programa **procura ele na rede local** (porta 8000 + a sua senha), atualiza o IP e envia. Leva poucos segundos e funciona em qualquer rede em que o PC e o Kindle estejam juntos. Para ver o IP atual, coloque o Kindle para dormir: ele aparece na faixa.
 
 ---
 
@@ -165,7 +169,8 @@ curl.exe -F "livro=@C:\caminho\arquivo.azw3" "http://IP-DO-KINDLE:8000/enviar?k=
 | Sintoma | O que fazer |
 |---|---|
 | O PC não acha o Kindle | O Kindle desliga o Wi-Fi quando dorme. Acorde o Kindle e confira o Wi-Fi. Os arquivos ficam na **fila** e são enviados depois. |
-| O IP mudou depois de reiniciar | Reserve o IP no roteador e atualize na aba **📖 Kindle** e no `.ssh\config`. |
+| O IP mudou (outra rede, reinício) | O Kindle Envia acha o Kindle sozinho. Para o SSH, veja o IP na faixa do screensaver. Em casa, vale reservar o IP no roteador. |
+| Redes de visitantes ou de empresa | Algumas isolam os aparelhos: o PC não enxerga o Kindle mesmo com os dois conectados. |
 | O servidor ou o painel não voltaram depois do boot | `cat /mnt/us/scripts/iniciar.log`. Para desligar o início automático sem SSH, crie um arquivo vazio `D:\scripts\DESLIGAR`. Para remover de vez: `sh /mnt/us/scripts/instalar-boot.sh remover`. |
 | `ps` não mostra os scripts | O `ps` do Kindle 4 é antigo e corta o nome. Use `pgrep -f servidor.py`. |
 | `nohup: not found` | Normal no Kindle 4: os scripts usam `--fundo` no lugar do `nohup`. |
