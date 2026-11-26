@@ -145,8 +145,8 @@ def montar():
     if nivel is None:
         bat = ""
     else:
-        # a fonte do eips não tem o símbolo "%": escreve por extenso
-        bat = ("CARREGAR! %d por cento" if nivel <= 15 else "bateria %d por cento") % nivel
+        # a fonte do eips do Kindle 4 não tem o "%" ("character not available")
+        bat = ("CHARGE! %d percent" if nivel <= 15 else "battery %d percent") % nivel
     endereco = ip_wifi() if MOSTRAR_IP else None
     linhas.append(("%s:8000" % endereco) if endereco else "sem Wi-Fi")
     data = "%s, %d %s" % (DIAS[hoje.weekday()], hoje.day, MESES[hoje.month - 1])
