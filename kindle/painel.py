@@ -144,17 +144,14 @@ def montar():
     nivel = bateria()
     if nivel is None:
         bat = ""
-    elif nivel <= 15:
-        bat = "CARREGAR! [%s]" % ("#" * (nivel // 10)).ljust(10, "-")
-    else:  # o eips não mostra o "%": usa uma barrinha
-        bat = "bat [%s]" % ("#" * round(nivel / 10.0)).ljust(10, "-")
+    else:
+        # a fonte do eips não tem o símbolo "%": escreve por extenso
+        bat = ("CARREGAR! %d por cento" if nivel <= 15 else "bateria %d por cento") % nivel
+    endereco = ip_wifi() if MOSTRAR_IP else None
+    linhas.append(("%s:8000" % endereco) if endereco else "sem Wi-Fi")
     data = "%s, %d %s" % (DIAS[hoje.weekday()], hoje.day, MESES[hoje.month - 1])
     linhas.append(data + bat.rjust(COLUNAS - 3 - len(data)))
-    endereco = ip_wifi() if MOSTRAR_IP else None
-    if endereco:
-        linhas.append(("-- %s:8000 " % endereco).ljust(COLUNAS - 2, "-"))
-    else:
-        linhas.append("-" * (COLUNAS - 2))
+    linhas.append("-" * (COLUNAS - 3))
 
     frases = ler_linhas(FRASES)
     if frases:
